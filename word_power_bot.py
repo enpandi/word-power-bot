@@ -88,16 +88,16 @@ spellings = []
 # from random import shuffle
 # def reset():
 #	global lines
-#	with open(r'C:\Users\panda\programming\discord\bots\word_power_words.txt',
+#	with open(r'word_power_words.txt',
 #          	encoding='utf8') as file:
 #		lines = file.read().splitlines()
 #	shuffle(lines)
 # reset()
-with open(r'C:\Users\panda\programming\discord\bots\word_power_words.txt',
+with open(r'word_power_words.txt',
           encoding='utf8') as file:
 	lines = file.read().splitlines()
 
-with open(r'C:\Users\panda\programming\discord\bots\word_power_banned.txt', encoding='utf8') as f:
+with open(r'word_power_banned.txt', encoding='utf8') as f:
 	bans = set(f.read().splitlines())
 	lines = [line for line in lines if line not in bans]
 # each of the 1500 words has an equal probability.
@@ -177,27 +177,27 @@ async def on_message(msg):
 		ban = msg.content[msg.content.find(' ') + 1:]
 		if ban in lines:
 			lines.remove(ban)
-			with open(r'C:\Users\panda\programming\discord\bots\word_power_banned.txt', 'a', -1, 'utf8', newline='\n') as f:
+			with open(r'word_power_banned.txt', 'a', -1, 'utf8', newline='\n') as f:
 				f.write(ban)
 				f.write('\n')
 	elif msg.content.startswith('unban'):
 		ban = msg.content[msg.content.find(' ') + 1:]
-		with open(r'C:\Users\panda\programming\discord\bots\word_power_banned.txt', 'r', -1, 'utf8', newline='\n') as f:
+		with open(r'word_power_banned.txt', 'r', -1, 'utf8', newline='\n') as f:
 			bans = [x for x in f.read().splitlines() if x and x != ban]
-		with open(r'C:\Users\panda\programming\discord\bots\word_power_banned.txt', 'w', -1, 'utf8', newline='\n') as f:
+		with open(r'word_power_banned.txt', 'w', -1, 'utf8', newline='\n') as f:
 			f.write('\n'.join(bans))
 			f.write('\n')
-		with open(r'C:\Users\panda\programming\discord\bots\word_power_words.txt',
+		with open(r'word_power_words.txt',
 		          encoding='utf8') as file:
 			lines = file.read().splitlines()
-		with open(r'C:\Users\panda\programming\discord\bots\word_power_banned.txt', encoding='utf8') as f:
+		with open(r'word_power_banned.txt', encoding='utf8') as f:
 			bans = set(f.read().splitlines())
 			lines = [line for line in lines if line not in bans]
 	elif msg.content == 'b':
 		ban = hidden_word
 		if ban in lines:
 			lines.remove(ban)
-			with open(r'C:\Users\panda\programming\discord\bots\word_power_banned.txt', 'a', -1, 'utf8', newline='\n') as f:
+			with open(r'word_power_banned.txt', 'a', -1, 'utf8', newline='\n') as f:
 				f.write(ban)
 				f.write('\n')
 		await msg.channel.send(hidden_word)
