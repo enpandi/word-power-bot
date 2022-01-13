@@ -1,4 +1,5 @@
 from functools import cache
+from os import makedirs
 from os.path import exists
 from random import choice
 from re import IGNORECASE, compile, sub
@@ -8,8 +9,7 @@ from urllib.parse import quote
 
 from bs4 import BeautifulSoup
 from discord import AudioSource, FFmpegPCMAudio, Message, VoiceClient, VoiceState
-from discord.ext.commands import Bot, Cog, CommandError, CommandNotFound, Context, DefaultHelpCommand
-from discord.ext.tasks import loop
+from discord.ext.commands import Bot, CommandError, CommandNotFound, Context, DefaultHelpCommand
 from requests import Response, get
 
 ACCENT_TRANSLATION_TABLE: dict = str.maketrans({
@@ -204,5 +204,7 @@ async def on_command_error(ctx: Context, error: CommandError):
 		raise error
 
 if __name__ == '__main__':
+	if not exists('wavs'):
+		makedirs('wavs')
 	randomize_hidden()
 	bot.run(os.environ['BOT_TOKEN'])
