@@ -1,215 +1,208 @@
+from functools import cache
+from os.path import exists
 from random import choice
-from requests import get
-from bs4 import BeautifulSoup
+from re import IGNORECASE, compile, sub
+from typing import Optional
+from unicodedata import normalize
 from urllib.parse import quote
-from functools import lru_cache
-from re import compile, IGNORECASE, sub
-from discord import Client, Member, FFmpegPCMAudio
 
-def convert_accents(s):
-	for typed, accented in ('a\\', 'à'), ('a/', 'á'), ('a^', 'â'), ('a:', 'ä'), \
-	                       ('c,', 'ç'), \
-	                       ('e\\', 'è'), ('e/', 'é'), ('e^', 'ê'), ('e:', 'ë'), \
-	                       ('i^', 'î'), \
-	                       ('n~', 'ñ'), \
-	                       ('o/', 'ó'), ('o^', 'ô'), ('o:', 'ö'), \
-	                       ('u/', 'ú'), ('u^', 'û'):
-		s = s.replace(typed, accented)
-	return s
+from bs4 import BeautifulSoup
+from discord import AudioSource, FFmpegPCMAudio, Message, VoiceClient, VoiceState
+from discord.ext.commands import Bot, Cog, CommandError, CommandNotFound, Context, DefaultHelpCommand
+from discord.ext.tasks import loop
+from requests import Response, get
 
-# connect to the voice channel of the user who mentioned the bot
-async def summon(msg):
-	global voice_channel, voice_client, hidden_word
-	if not hidden_word:
-		randomize_word()
-	if isinstance(msg.author, Member):
-		if voice_state := msg.author.voice:
-			if voice_channel != voice_state.channel:
-				voice_channel = voice_state.channel
-				if voice_client:
-					await voice_client.disconnect()
-				voice_client = await voice_channel.connect()
-				await msg.guild.change_voice_state(channel=voice_channel, self_deaf=True)
+ACCENT_TRANSLATION_TABLE: dict = str.maketrans({
+	'\\': '\N{combining grave accent}',  # àè
+	'/' : '\N{combining acute accent}',  # áéóú
+	'^' : '\N{combining circumflex accent}',  # âêîôû
+	'~' : '\N{combining tilde}',  # ñ
+	':' : '\N{combining diaeresis}',  # äëö
+	',' : '\N{combining cedilla}',  # ç
+})
 
-# l
-def get_dictionary_url(word):
-	return f"https://www.ahdictionary.com/word/search.html?q={quote(word)}"
+def translate_accents(untranslated: str) -> str:
+	return normalize('NFC', untranslated.translate(ACCENT_TRANSLATION_TABLE))
 
-@lru_cache(8)
-def get_soup(word):
-	return BeautifulSoup(get(get_dictionary_url(word)).text, 'html.parser').find(id='results')
+def get_chrome(ahdictionary_url: str) -> Response:
+	# anti-anti-bot User-Agent
+	headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/97.0.4692.71 Safari/537.36'}
+	response = get(ahdictionary_url, headers=headers)
+	return response
 
-# convert a word to an audio URL
-@lru_cache(8)
-def get_audio_url(word):
-	name = get_soup(word).find(target='_blank')
-	if not name or not (name := name['href']).endswith('.wav'):
-		name = '/application/resources/wavs/E0202600.wav'  # error
-	return f"https://ahdictionary.com{name}"
+def download_file(path: str, url: str):
+	if not exists(path):
+		with open(path, 'wb') as file:
+			response = get_chrome(url)
+			file.write(response.content)
+		print(f"downloaded {path} from {url}")
 
-# p
-def pronounce_word(word):
-	if voice_client and voice_client.is_connected():
-		url = get_audio_url(word)
-		voice_client.play(FFmpegPCMAudio(url, options='-ar 48000'))
+class Word:
+	ERROR_AUDIO_PATH = 'wavs/$error.wav'
 
-dp = [list(range(22))]
+	@staticmethod
+	@cache
+	def make_word(word_entry: str):
+		return Word(word_entry)
+
+	def __init__(self, word_entry: str):
+		self.word_entry = word_entry
+		self.spellings = Word.extract_spellings(self.word_entry)
+		search_results = Word.get_search_results(self.spellings[0])
+		definition = Word.get_definition(search_results)
+		for spelling in self.spellings:
+			definition = sub(compile(spelling, IGNORECASE), '###', definition)
+		self.definition = definition
+		self.audio_path, self.audio_url = Word.get_pronunciation(search_results)
+
+	def __repr__(self):
+		return f"Word({self.word_entry!r})"
+
+	@staticmethod
+	def extract_spellings(word_entry: str) -> list[str]:
+		if word_entry[-1] == '*':
+			word_entry = word_entry[:-2]
+		if word_entry[-1] == ')':
+			word_entry = word_entry[:word_entry.find(' (')]
+		return word_entry.split('/')
+
+	@staticmethod
+	def get_search_results(query: str) -> BeautifulSoup:
+		search_url = f"https://www.ahdictionary.com/word/search.html?q={quote(query)}"
+		search_response = get_chrome(search_url)
+		search_results = BeautifulSoup(search_response.content, 'html.parser').find(id='results')
+		return search_results
+
+	@staticmethod
+	def get_definition(search_results: BeautifulSoup) -> str:
+		return '\n'.join(ds.text.strip() for ds in search_results(class_=('ds-single', 'ds-list')))
+
+	@staticmethod
+	def get_pronunciation(search_results: BeautifulSoup) -> tuple[str, str]:
+		audio_anchor = search_results.find('a', target='_blank')
+		if audio_anchor and audio_anchor['href'].endswith('.wav'):
+			wav_path = audio_anchor['href']
+			wav_path = wav_path[wav_path.rindex('/') - 4:]
+			wav_url = f"https://ahdictionary.com/application/resources/{wav_path}"
+		else:
+			wav_path = Word.ERROR_AUDIO_PATH
+			wav_url = 'https://ahdictionary.com/application/resources/wavs/E0202600.wav'
+		return wav_path, wav_url
+
+	async def define(self, msg: Message):
+		await msg.channel.send(self.definition or 'no definition found')
+
+	async def pronounce(self, msg: Message):
+		global voice_client
+		download_file(self.audio_path, self.audio_url)
+		print(f"pronouncing {self.word_entry!r} (stored locally at {self.audio_path})")
+		voice_state: VoiceState = msg.author.voice
+		if voice_state:
+			if not voice_client:
+				voice_client = await voice_state.channel.connect()
+				await msg.guild.change_voice_state(channel=voice_state.channel, self_deaf=True)
+			if voice_client.channel != voice_state.channel:
+				await voice_client.move_to(voice_state.channel)
+				await msg.guild.change_voice_state(channel=voice_state.channel, self_deaf=True)
+			if not voice_client.is_playing():  # and voice_client.is_connected() ?
+				audio_source: AudioSource = FFmpegPCMAudio(self.audio_path, before_options='-channel_layout mono')
+				voice_client.play(audio_source)
+		else:
+			await msg.channel.send(f"{msg.author} is not in a voice channel, cannot `pronounce`")
+		if self.audio_path == Word.ERROR_AUDIO_PATH:
+			await msg.channel.send('no pronunciation found')
+			await self.define(msg)
+
+voice_client: Optional[VoiceClient] = None
+
+dp = []
 def levenshtein_distance(s, t):
+	global dp
+	# https://www.baeldung.com/cs/levenshtein-distance-computation
+	print(f"calculating levenshtein distance between {s!r} and {t!r}")
+	if len(s) < len(t):
+		s, t = t, s
 	n, m = len(s), len(t)
-	while len(dp) <= n:
-		dp.append([len(dp)]*22)
-	for i in range(1, n + 1):
-		for j in range(1, m + 1):
-			dp[i][j] = min((
-				dp[i - 1][j] + 1,
-				dp[i][j - 1] + 1,
-				dp[i - 1][j - 1] + (s[i - 1] != t[j - 1])
-			))
-	return dp[n][m]
+	if len(dp) < m + 1:
+		dp.extend(range(m + 1 - len(dp)))
+	dp[:m + 1] = range(m + 1)
+	for i in range(n):
+		prev_above = dp[0]
+		dp[0] = i + 1
+		for j in range(m):
+			prev_diag = prev_above
+			prev_above = dp[j + 1]
+			dp[j + 1] = min(prev_above + 1, dp[j] + 1, prev_diag + (s[i] != t[j]))
+	return dp[m]
 
-# e
-def min_edits(guess):
-	return min(levenshtein_distance(guess, spelling) for spelling in spellings)
+with open(r'word_power_words.txt', encoding='utf8') as file:
+	word_entries = file.read().splitlines()
 
-# s
-@lru_cache(8)
-def get_definition(word):
-	soup = get_soup(word)
-	if div := soup.find(align='right'):
-		div.decompose()
-	definition = '\n'.join(ds.text.strip() for ds in soup(class_=('ds-list', 'ds-single')))
-	for spelling in spellings:
-		definition = sub(compile(spelling, IGNORECASE), '###', definition)
-	return definition
+hidden_word_entry: str
+hidden_word: Word
+def randomize_hidden():
+	global hidden_word_entry, hidden_word
+	hidden_word_entry = choice(word_entries)
+	hidden_word = Word.make_word(hidden_word_entry)
+	print(f"randomized to {hidden_word_entry!r}")
 
-# n
-hidden_word = ''
-spellings = []
-# from random import shuffle
-# def reset():
-#	global lines
-#	with open(r'word_power_words.txt',
-#          	encoding='utf8') as file:
-#		lines = file.read().splitlines()
-#	shuffle(lines)
-# reset()
-with open(r'word_power_words.txt',
-          encoding='utf8') as file:
-	lines = file.read().splitlines()
+bot = Bot(
+	command_prefix='',
+	help_command=DefaultHelpCommand(
+		no_category='commands',
+		sort_commands=False
+	),
+	description='bot for practicing for spelling & vocabulary uil',
+	case_insensitive=True,
+)
 
-with open(r'word_power_banned.txt', encoding='utf8') as f:
-	bans = set(f.read().splitlines())
-	lines = [line for line in lines if line not in bans]
-# each of the 1500 words has an equal probability.
-# within each word, each spelling has an equal probability.
-# from random import shuffle
-# shuffle(lines)
-# it = iter(lines)
-def randomize_word():
-	global hidden_word, spellings
-	hidden_word = spellings = choice(lines)  # lines.pop() #choice(lines)
-	#	hidden_word = spellings = next(it)
-	if spellings[-1] == '*':
-		spellings = spellings[:-2]
-	if spellings[-1] == ')':
-		spellings = spellings[:spellings.find(' (')]
-	spellings = spellings.split('/')
+@bot.command(aliases=('p', 'pronunciation'))
+async def pronounce(ctx: Context, *word: str):
+	word = ' '.join(word)
+	await (Word.make_word(word)
+	       if word else hidden_word
+	       ).pronounce(ctx.message)
 
-voice_channel = voice_client = None
-client = Client()
+@bot.command(aliases=('d', 'definition'))
+async def define(ctx: Context, *word: str):
+	word = ' '.join(word)
+	await (Word.make_word(word)
+	       if word else hidden_word
+	       ).define(ctx.message)
 
-from time import sleep
+@bot.command(aliases=('e', 'edit-distance', 'ed', 'levenshtein-distance', 'ld', 'lev', 'l', 'distance', 'dist', 'difference', 'diff'))
+async def edit(ctx: Context, *word: str):
+	word = ' '.join(word)
+	await ctx.send(f"{min(levenshtein_distance(word, spelling) for spelling in hidden_word.spellings)}")
 
-@client.event
-async def on_message(msg):
-	global lines
-	#	sleep(5)
-	#	msg.content = 'n'
-	if msg.author == client.user:
+@bot.command(aliases=('n', 'new-word', 'nw'))
+async def new(ctx: Context):
+	await ctx.send(hidden_word_entry)
+	randomize_hidden()
+	await hidden_word.pronounce(ctx.message)
+
+@bot.command(aliases=('s', 'give-up', 'g'))
+async def show(ctx: Context):
+	await ctx.send(hidden_word_entry)
+
+@bot.event
+async def on_message(msg: Message):
+	if msg.author == bot.user:
 		return
-	msg.content = convert_accents(msg.content)
-	# correct answer
-	if msg.content in spellings:
-		await msg.add_reaction('\N{WHITE HEAVY CHECK MARK}')
-		await msg.channel.send(hidden_word)
-		randomize_word()
-		pronounce_word(spellings[0])
-		await msg.channel.send(get_definition(spellings[0]))
-	# pronounce
-	elif msg.content == 'p':
-		await summon(msg)
-		pronounce_word(spellings[0])
-	elif msg.content.startswith('p '):
-		await summon(msg)
-		pronounce_word(msg.content[msg.content.find(' ') + 1:])
-	# query edit distance
-	elif msg.content.endswith('.'):
-		await summon(msg)
-		e = min_edits(msg.content[msg.content.find(' ') + 1:-1])
-		await msg.channel.send(e)
-		await msg.add_reaction(f"{e%12}️⃣" if e < 10 else '\N{CROSS MARK}')
-	# search definition
-	elif msg.content == 's':
-		await summon(msg)
-		await msg.channel.send(get_definition(spellings[0]))
-	elif msg.content.startswith('s '):
-		await summon(msg)
-		await msg.channel.send(get_definition(msg.content[msg.content.find(' ') + 1:]))
-	# new word
-	elif msg.content == 'n':
-		await msg.channel.send(hidden_word)
-		randomize_word()
-		await summon(msg)
-		pronounce_word(spellings[0])
-		await msg.channel.send(get_definition(spellings[0]))
-	# give up
-	elif msg.content == 'G' or msg.content == 'g':
-		await summon(msg)
-		await msg.channel.send(hidden_word)
-	# get link
-	elif msg.content == 'l':
-		await summon(msg)
-		await msg.channel.send(get_dictionary_url(spellings[0]))
-	elif msg.content.startswith('l '):
-		await summon(msg)
-		await msg.channel.send(get_dictionary_url(msg.content[msg.content.find(' ') + 1:]))
-	elif msg.content.startswith('ban'):
-		ban = msg.content[msg.content.find(' ') + 1:]
-		if ban in lines:
-			lines.remove(ban)
-			with open(r'word_power_banned.txt', 'a', -1, 'utf8', newline='\n') as f:
-				f.write(ban)
-				f.write('\n')
-	elif msg.content.startswith('unban'):
-		ban = msg.content[msg.content.find(' ') + 1:]
-		with open(r'word_power_banned.txt', 'r', -1, 'utf8', newline='\n') as f:
-			bans = [x for x in f.read().splitlines() if x and x != ban]
-		with open(r'word_power_banned.txt', 'w', -1, 'utf8', newline='\n') as f:
-			f.write('\n'.join(bans))
-			f.write('\n')
-		with open(r'word_power_words.txt',
-		          encoding='utf8') as file:
-			lines = file.read().splitlines()
-		with open(r'word_power_banned.txt', encoding='utf8') as f:
-			bans = set(f.read().splitlines())
-			lines = [line for line in lines if line not in bans]
-	elif msg.content == 'b':
-		ban = hidden_word
-		if ban in lines:
-			lines.remove(ban)
-			with open(r'word_power_banned.txt', 'a', -1, 'utf8', newline='\n') as f:
-				f.write(ban)
-				f.write('\n')
-		await msg.channel.send(hidden_word)
-		randomize_word()
-		await summon(msg)
-		pronounce_word(spellings[0])
-		await msg.channel.send(get_definition(spellings[0]))
-	#	elif msg.content == 'reset':
-	#		reset()
-	elif msg.content == 'r':
-		await msg.channel.send(choice(lines))
-	elif msg.content == 'ra':
-		await msg.channel.send(choice(lines))
+	msg.content = translate_accents(msg.content)
+	if msg.content in hidden_word.spellings:
+		await msg.add_reaction('\N{white heavy check mark}')
+		randomize_hidden()
+		await hidden_word.pronounce(msg)
+	else:
+		await bot.process_commands(msg)
 
-client.run(os.environ['BOT_TOKEN'])
+# noinspection PyUnusedLocal
+@bot.event
+async def on_command_error(ctx: Context, error: CommandError):
+	if not isinstance(error, CommandNotFound):
+		raise error
+
+if __name__ == '__main__':
+	randomize_hidden()
+	bot.run(os.environ['BOT_TOKEN'])
