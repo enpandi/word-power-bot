@@ -127,6 +127,8 @@ async def new(ctx: Context):
 	await ctx.send(hidden_word_entry)
 	randomize_hidden()
 	await pronounce_word(ctx.message, hidden_word)
+	if hidden_word_entry[-1] == '*':
+		await define_word(ctx.message, hidden_word)
 
 @bot.command(aliases=('s', 'give-up', 'g'))
 async def show(ctx: Context):
