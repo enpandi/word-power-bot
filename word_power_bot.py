@@ -18,6 +18,7 @@ ACCENT_TRANSLATION_TABLE: dict = str.maketrans({
 })
 
 def translate_accents(untranslated: str) -> str:
+	"""Converts symbols for easy accent input."""
 	return normalize('NFC', untranslated.translate(ACCENT_TRANSLATION_TABLE))
 
 async def define_word(msg: Message, word: Word):
@@ -86,7 +87,19 @@ bot = Bot(
 		no_category='commands',
 		sort_commands=False
 	),
-	description='bot for practicing for spelling & vocabulary uil',
+	description="""bot for practicing for spelling & vocabulary uil
+
+To input accented characters, add a special symbol after the character you wish to accent.
+For example, espan~ol becomes español
+more examples of supported accent conversions:
+\ àè
+/ áéóú
+^ âêîôû
+~ ñ
+: äëö
+, ç
+Alternatively, just type the accented character.
+""",
 	case_insensitive=True,
 )
 
