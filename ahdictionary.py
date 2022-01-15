@@ -114,6 +114,7 @@ class Word:
 		if not exists(self._audio_path):
 			makedirs(dirname(self._audio_path), exist_ok=True)
 			with open(self._audio_path, 'wb') as file:
-				response = get_as_chrome(self._audio_path)
+				response = get_as_chrome(self._audio_url)
+				print(f"downloaded {self._audio_url} to {self._audio_path}")
 				file.write(response.content)
 		return self._audio_path
