@@ -1,3 +1,4 @@
+from os import environ
 from random import choice
 from typing import Optional
 from unicodedata import normalize
@@ -143,5 +144,4 @@ async def on_command_error(ctx: Context, error: CommandError):
 
 if __name__ == '__main__':
 	randomize_hidden()
-	from config import bot_token
-	bot.run(bot_token)
+	bot.run(environ['BOT_TOKEN'])
