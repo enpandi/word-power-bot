@@ -103,10 +103,10 @@ async def define(ctx: Context, *word: str):
 	await define_word(ctx.message, Word.make_word(word) if word else hidden_word)
 
 @bot.command(aliases=('e', 'edit-distance', 'ed', 'levenshtein-distance', 'ld', 'lev', 'l', 'distance', 'dist', 'difference', 'diff'))
-async def edit(ctx: Context, *word: str):
+async def edit(ctx: Context, *guess: str):
 	"""Sends the minimum possible Levenshtein distance between the guess and a spelling of the hidden word."""
-	word = ' '.join(word)
-	await ctx.send(f"{min(levenshtein_distance(word, spelling) for spelling in hidden_word.spellings)}")
+	guess = ' '.join(guess)
+	await ctx.send(f"{min(levenshtein_distance(guess, spelling) for spelling in hidden_word.spellings)}")
 
 @bot.command(aliases=('n', 'new-word', 'nw'))
 async def new(ctx: Context):
