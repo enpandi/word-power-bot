@@ -133,7 +133,7 @@ async def new(ctx: Context):
 @bot.command(aliases=('s', 'give-up', 'g'))
 async def show(ctx: Context):
 	"""Reveals the hidden word."""
-	await ctx.send(hidden_word_entry)
+	await ctx.send(f"||{hidden_word_entry}||")
 
 @bot.event
 async def on_message(msg: Message):
