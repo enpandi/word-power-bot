@@ -145,7 +145,7 @@ async def on_message(msg: Message):
 	msg.content = translate_accents(msg.content)
 	if msg.content in hidden_word.spellings:
 		await msg.add_reaction('\N{white heavy check mark}')
-		await msg.send(hidden_word_entry)
+		await msg.channel.send(hidden_word_entry)
 		randomize_hidden()
 		await pronounce_word(msg, hidden_word)
 	else:
