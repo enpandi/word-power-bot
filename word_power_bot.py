@@ -1,6 +1,6 @@
 from collections import defaultdict
 from io import StringIO
-from json import dumps
+from json import dumps, loads
 from os import environ
 from random import choice, choices
 from typing import Optional
@@ -95,7 +95,7 @@ async def load_data(channel_id: int = int(environ['DATA_CHANNEL_ID'])):
 	data_url: str = last_message.attachments[0]
 	print(f"data url: {data_url}")
 	try:
-		data = get(data_url).json()
+		data = loads(get(data_url).text)
 	except JSONDecodeError:
 		await channel.send('bad data (invalid json)')
 		raise
@@ -132,7 +132,7 @@ async def store_data(channel_id: int = int(environ['DATA_CHANNEL_ID'])):
 	await channel.send(file=File(
 		StringIO(dumps(
 			{'aggression_value': aggression_value, 'weights': weights, 'words': word_entries},
-			ensure_ascii=True, indent='\t'
+			indent='\t', ensure_ascii=False
 		)), filename='data.json'
 	))
 
@@ -171,10 +171,10 @@ bot = Bot(
 bot for practicing for spelling & vocabulary uil
 
 To input accented characters, add a special symbol after the character you wish to accent.
-For example, espan~ol becomes español
-more examples of supported accent conversions:
+For example, espan~ol becomes español.
+These accent conversions are known to be supported:
 \ àè
-/ áéóú
+/ áéíóú
 ^ âêîôû
 ~ ñ
 : äëö
