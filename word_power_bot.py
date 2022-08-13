@@ -1,14 +1,14 @@
+import json
+import os
+import unicodedata
 from collections import defaultdict
 from io import StringIO
-from json import dumps, loads
-from os import environ
 from random import choice, choices
 from typing import Optional
-from unicodedata import normalize
 
+import requests
 from discord import AudioSource, FFmpegPCMAudio, File, Intents, Message, TextChannel, User, VoiceClient, VoiceState
 from discord.ext.commands import Bot, CommandError, CommandNotFound, Context, DefaultHelpCommand
-from requests import JSONDecodeError, get
 
 from ahdictionary import Word
 
@@ -23,7 +23,7 @@ ACCENT_TRANSLATION_TABLE: dict = str.maketrans({
 
 def translate_accents(untranslated: str) -> str:
 	"""Converts symbols for easy accent input."""
-	return normalize('NFC', untranslated.translate(ACCENT_TRANSLATION_TABLE))
+	return unicodedata.normalize('NFC', untranslated.translate(ACCENT_TRANSLATION_TABLE))
 
 async def define_word(msg: Message, word: Word):
 	"""Sends the definition, if one was found."""
@@ -81,7 +81,7 @@ word_entries: list[str]
 weights: defaultdict[str, defaultdict[str, float]]
 aggression_value: float
 
-async def load_data(channel_id: int = int(environ['DATA_CHANNEL_ID'])):
+async def load_data(channel_id: int = int(os.environ['DATA_CHANNEL_ID'])):
 	global word_entries, weights, aggression_value
 	channel: TextChannel = bot.get_channel(channel_id)
 	try:
@@ -95,7 +95,7 @@ async def load_data(channel_id: int = int(environ['DATA_CHANNEL_ID'])):
 	data_url: str = last_message.attachments[0]
 	print(f"data url: {data_url}")
 	try:
-		data = loads(get(data_url).text)
+		data = json.loads(requests.get(data_url).text)
 	except JSONDecodeError:
 		await channel.send('bad data (invalid json)')
 		raise
@@ -127,10 +127,10 @@ async def load_data(channel_id: int = int(environ['DATA_CHANNEL_ID'])):
 		return
 	aggression_value = float(data['aggression_value'])
 
-async def store_data(channel_id: int = int(environ['DATA_CHANNEL_ID'])):
+async def store_data(channel_id: int = int(os.environ['DATA_CHANNEL_ID'])):
 	channel: TextChannel = bot.get_channel(channel_id)
 	await channel.send(file=File(
-		StringIO(dumps(
+		StringIO(json.dumps(
 			{'aggression_value': aggression_value, 'weights': weights, 'words': word_entries},
 			indent='\t', ensure_ascii=False
 		)), filename='data.json'
@@ -218,6 +218,7 @@ async def show(ctx: Context):
 
 @bot.event
 async def on_ready():
+	print('bot ready')
 	await load_data()
 	await randomize_hidden()
 
@@ -257,4 +258,4 @@ async def on_command_error(ctx: Context, error: CommandError):
 
 if __name__ == '__main__':
 	# randomize_hidden()
-	bot.run(environ['BOT_TOKEN'])
+	bot.run(os.environ['BOT_TOKEN'])
