@@ -96,8 +96,8 @@ async def load_data(channel_id: int = int(os.environ['DATA_CHANNEL_ID'])):
 	print(f"data url: {data_url}")
 	try:
 		data = json.loads(requests.get(data_url).text)
-	except JSONDecodeError:
-		await channel.send('bad data (invalid json)')
+	except json.JSONDecodeError as err:
+		await channel.send(f"bad data (invalid json) {err}")
 		raise
 
 	if 'words' not in data:
@@ -126,6 +126,8 @@ async def load_data(channel_id: int = int(os.environ['DATA_CHANNEL_ID'])):
 		await channel.send('bad data (aggression_value must be >1)')
 		return
 	aggression_value = float(data['aggression_value'])
+
+	await last_message.add_reaction('\N{clockwise rightwards and leftwards open circle arrows}')
 
 async def store_data(channel_id: int = int(os.environ['DATA_CHANNEL_ID'])):
 	channel: TextChannel = bot.get_channel(channel_id)
@@ -183,6 +185,11 @@ Alternatively, just type the accented character.
 """,
 	case_insensitive=True,
 )
+
+@bot.command(aliases=('r',))
+async def reload(ctx: Context):
+	await load_data()
+	await randomize_hidden()
 
 @bot.command(aliases=('p', 'pronunciation'))
 async def pronounce(ctx: Context, *word: str):
